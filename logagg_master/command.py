@@ -1,4 +1,5 @@
 import os
+import socket
 
 from basescript import BaseScript
 from deeputil import AttrDict
@@ -15,28 +16,45 @@ class LogaggMasterCommand(BaseScript):
 
     def run(self):
 
-        master = AttrDict()
+        port = self.args.port
+        host = self.args.host 
+
+        auth = AttrDict()
         try:
-            m = self.args.master.split(':')
+            m = self.args.auth.split(':')
             # So that order of keys is not a factor
             for a in m:
                 a = a.split('=')
-                if a[0] == 'host': master.host = a[-1]
-                elif a[0] == 'port': master.port = a[-1]
-                elif a[0] == 'key': master.key = a[-1]
-                elif a[0] == 'secret': master.secret = a[-1]
+                if a[0] == 'key': auth.key = a[-1]
+                elif a[0] == 'secret': auth.secret = a[-1]
                 else: raise ValueError
 
         except ValueError:
-            raise InvalidArgument(self.args.master)
+            raise InvalidArgument(self.args.auth)
+
+        mongodb = AttrDict()
+        try:
+            m = self.args.mongodb.split(':')
+            for a in m:
+                a = a.split('=')
+                if a[0] == 'host': mongodb.host = a[-1]
+                elif a[0] == 'port': mongodb.port = a[-1]
+                elif a[0] == 'user': mongodb.user = a[-1]
+                elif a[0] == 'passwd': mongodb.passwd = a[-1]
+                elif a[0] == 'db': mongodb.name = a[-1]
+                else: raise ValueError
+
+        except ValueError:
+            raise InvalidArgument(self.args.mongodb)
 
         # Create LogaggService object
-        ls = LogaggService(
-            self.args.sqlite_db,
-            master,
-            self.log)
+        ls = Master(host,
+                port,
+                mongodb,
+                auth,
+                self.log)
 
-        master_api = LogaggService(ls, self.log)
+        master_api = MasterService(ls, self.log)
         api = API()
         api.register(master_api, 'v1')
 
@@ -54,15 +72,22 @@ class LogaggMasterCommand(BaseScript):
                 help='Run logagg master service')
 
         master_cmd.set_defaults(func=self.run)
+
         master_cmd.add_argument(
                 '--port', '-p', default=1088,
-                help='port to run logagg collector service on, default: %(default)s')
+                help='Port to run logagg master service on, default: %(default)s')
+
         master_cmd.add_argument(
-                '--master', '-m',
-                help= 'Master service details, format: <host=localhost:port=1100:key=xyz:secret=xxxx>')
+                '--host', '-i', default=socket.gethostname(),
+                help='Hostname of this service for other components to contact to, default: %(default)s')
+
         master_cmd.add_argument(
-                '--sqlite-db', '-d', default='logagg',
-                help= 'Database name, default: %(default)s')
+                '--auth', '-a', required=True,
+                help= 'Service auth details to grant access to components, format: <key=xyz:secret=xxxx>')
+
+        master_cmd.add_argument(
+                '--mongodb', '-d', required=True,
+                help= 'Database details, format: <host=localhost:port=27017:user=xyz:passwd=xxxx:db=name>')
 
 def main():
     LogaggMasterCommand().start()

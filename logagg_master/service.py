@@ -3,11 +3,11 @@ from typing import Generator
 import time
 
 import ujson as json
-from kwikapi import Request
+from kwikapi import Request, BaseProtocol
 import tornado
 import pymongo
 from pymongo import MongoClient
-from deeputil import generate_random_string, keeprunning
+from deeputil import generate_random_string, keeprunning, AttrDict
 import requests
 from logagg_utils import log_exception, start_daemon_thread
 
@@ -15,7 +15,7 @@ class MasterService():
     '''
     Logagg master API
     '''
-    NSQ_API_URL = 'http://{nsq_api_address}/tail?nsqd_tcp_address={nsqd_tcp_address}&topic={topic}'
+    NSQ_API_URL = 'http://{nsq_api_address}/tail?nsqd_tcp_address={nsqd_tcp_address}&topic={topic}&empty_lines={empty_lines}'
     NSQ_DEPTH_LIMIT = 1000000
 
     def __init__(self, master, log):
@@ -23,90 +23,96 @@ class MasterService():
         self.master = master
         self.log = log
 
-    def set_nsq(self, nsqd_tcp_address:str, nsqd_http_address:str, cluster_name:str) -> list:
+
+    def ping(self, key:str, secret:str) -> dict:
+        '''
+        Sample url:
+        'http://localhost:1088/logagg/v1/ping?key=xyz&secret=xxxx'
+        '''
+        if key == self.master.auth.key and secret == self.master.auth.secret:
+            return {'success': True, 'details': 'Authentication passed'}
+        else:
+            return {'success': True, 'details': 'Authentication failed'}
+
+        return {'success': False, 'details': 'Authentication failed'}
+
+
+    def add_nsq(self, nsqd_tcp_address:str, nsqd_http_address:str, key:str, secret:str) -> dict:
         '''
         Insert nsq details into master
         Sample url:
-        'http://localhost:1088/logagg/v1/set_nsq?nsqd_tcp_address="<hostname>:4150"&nsqd_http_address="<hostname>:4151"&cluster_name=logagg'
+        'http://localhost:1088/logagg/v1/add_nsq?nsqd_tcp_address="<hostname>:4150"&nsqd_http_address="<hostname>:4151"&key=xyz&secret=xxxx'
         '''
-        details = {'nsqd_tcp_address': nsqd_tcp_address,
-                    'nsqd_http_address': nsqd_http_address,
-                    'cluster_name': cluster_name,
-                    'log_topic': cluster_name+'_logs',
-                    'heartbeat_topic': cluster_name+'_heartbeat#ephemeral',
-                    'nsq_depth_limit': self.NSQ_DEPTH_LIMIT}
+        if key == self.master.auth.key and secret == self.master.auth.secret:
+            nsq_api = dict()
+            random_nsq_api = self.master.nsq_api_collection.aggregate([{'$sample': {'size': 1}}])
 
-        try:
-            object_id = self.master.nsq_collection.insert_one(details).inserted_id
+            for n in random_nsq_api:
+                nsq_api = n
 
-        except pymongo.errors.DuplicateKeyError as dke:
-            self.log.info('duplicate_details', err=dke.details)
-            
-            return {'duplicate_details': dke.details}
+            if not nsq_api:
+                return {'success': False, 'details': 'No nsq_api in master to assign to NSQ'}
 
-        return {'object_id': object_id.__str__()}
+            details = {'nsqd_tcp_address': nsqd_tcp_address,
+                        'nsqd_http_address': nsqd_http_address,
+                        'nsq_depth_limit': self.NSQ_DEPTH_LIMIT,
+                        'nsq_api_address': nsq_api['host']+':'+str(nsq_api['port'])}
 
-    def get_nsq(self, cluster_name:str) -> dict:
+            try:
+                object_id = self.master.nsq_collection.insert_one(details).inserted_id
+
+            except pymongo.errors.DuplicateKeyError as dke:
+                return {'details': 'Duplicate nsq details', 'success': False}
+
+            return {'success': True, 'details': 'Added NSQ details'}
+
+        else:
+
+            return {'success': False, 'details': 'Authentication failed'}
+
+
+    def get_nsq(self, key:str, secret:str) -> list:
         '''
         Get nsq details
         Sample url:
-        'http://localhost:1088/logagg/v1/get_nsq?cluster_name=logagg'
+        'http://localhost:1088/logagg/v1/get_nsq?key=xyz&secret=xxxx'
         '''
-        nsq = self.master.nsq_collection.find_one()
-        nsq.pop('_id')
-        
-        return nsq
+        if key == self.master.auth.key and secret == self.master.auth.secret:
+            nsq = self.master.nsq_collection.find()
+            nsq_list = list()
+            for n in nsq:
+                n.pop('_id')
+                nsq_list.append(n)
+            return {'success': True, 'nsq_list':nsq_list}
+        else:
+            return {'success': False, 'details': 'Authentication failed'}
 
-    def register_component(self, namespace:str, cluster_name:str, cluster_passwd:str, host:str, port:str) -> dict:
+
+    def register_nsq_api(self, key:str, secret:str, host:str, port:str) -> dict:
         '''
-        Validate auth details and store details of component in database
+        Validate auth details and store details of component in master
         Sample url:
-        'http://localhost:1088/logagg/v1/register_component?namespace=master&cluster_name=logagg&cluster_passwd=xxxx&host=78.47.113.210&port=1088'
+        'http://localhost:1088/logagg/v1/register_nsq_api?key=xyz&secret=xxxx&host=172.168.0.12&port=1077'
         '''
-        c = self.master.cluster_collection.find_one({'cluster_name': cluster_name})
 
-        if cluster_passwd == c['cluster_passwd']:
-            component_info = {'namespace':namespace,
-                    'host':host,
-                    'port':port,
-                    'cluster_name':cluster_name}
+        if key == self.master.auth.key and secret == self.master.auth.secret:
+
+            details = {'host': host,
+                'port': port}
+
             try:
-                object_id = self.master.component_collection.insert_one(component_info).inserted_id
-                return {'authentication': 'passed'}
+                object_id = self.master.nsq_api_collection.insert_one(details).inserted_id
 
             except pymongo.errors.DuplicateKeyError as dke:
-                self.log.error('duplicate_details', err=dke.details)
+                return {'details': 'Duplicate nsq_api details', 'success': True}
 
-                return {'authentication': 'passed', 'duplicate_details': dke.details}
+            return {'success': True, 'details': 'Added nsq_api details'}
+
         else:
-            return {'authentication': 'failed'}
 
-    def tail_heartbeat(self, req:Request, cluster_name:str) -> Generator:
-        '''
-        Sample url:
-        'http://localhost:1077/nsq_api/tail?nsqd_tcp_address=195.201.98.142:4150&topic=Heartbeat'
-        '''
-        nsq_api = self.master.component_collection.find_one({'$and':[{'cluster_name': cluster_name}, {'namespace':'nsq_api'}]})
-        nsq = self.master.nsq_collection.find_one({'cluster_name': cluster_name})
-        topic = nsq['heartbeat_topic']
-        host = nsq_api['host']
-        port = str(nsq_api['port'])
-        nsqd_tcp_address = nsq['nsqd_tcp_address']
+            return {'success': False, 'details': 'Authentication failed'}
 
-        url = self.NSQ_API_URL.format(nsq_api_address=host+':'+port,nsqd_tcp_address=nsqd_tcp_address,topic=topic)
-        s = requests.session()
-        resp = s.get(url, stream=True)
-        for chunk in resp.iter_content(chunk_size=1024):
-            if req._request.connection.stream.closed():
-                self.log.info('stream_closed')
-                resp.close()
-                self.finish()
-                break
-            else:
-                self.log.info('yeilding')
-                yield chunk.decode('utf-8')
-
-
+   
     def create_cluster(self, cluster_name:str) -> dict:
         '''
         Create cluster in master
@@ -114,15 +120,64 @@ class MasterService():
         'http://localhost:1088/logagg/v1/create_cluster?cluster_name=logagg'
         '''
         passwd = generate_random_string(8).decode('utf-8') 
+        random_nsq = self.master.nsq_collection.aggregate([{'$sample': {'size': 1}}])
+        nsq = dict()
+
+        for n in random_nsq:
+            nsq = n
+
+        if not nsq:
+            return {'success': False, 'details': 'No NSQ in master to assign to cluster'}
 
         cluster_info = {'cluster_name': cluster_name,
-                'cluster_passwd': passwd}
+                'cluster_passwd': passwd,
+                'nsqd_tcp_address': nsq['nsqd_tcp_address'],
+                'nsqd_http_address': nsq['nsqd_http_address'],
+                'nsq_depth_limit': nsq['nsq_depth_limit'],
+                'nsq_api_address': nsq['nsq_api_address'],
+                'heartbeat_topic': cluster_name+'_heartbeat',
+                'logs_topic': cluster_name+'_logs'}
         try:
             object_id = self.master.cluster_collection.insert_one(cluster_info).inserted_id
-            return {'cluster_name': cluster_name, 'cluster_passwd': passwd}
+            return {'success': True, 'cluster_name': cluster_name, 'cluster_passwd': passwd}
 
         except pymongo.errors.DuplicateKeyError as dke:
-            return {'duplicate_details': dke.details}
+            return {'success': False, 'details': 'Cluster name already existing'}
+
+    def get_clusters(self) -> list:
+        '''
+        Get cluster information
+        Sample url:
+        'http://localhost:1088/logagg/v1/get_clusters'
+        '''
+
+        clusters = self.master.cluster_collection.find()
+
+        cluster_list = list()
+        for c in clusters:
+            del c['_id']
+            del c['cluster_passwd']
+            cluster_list.append(c)
+
+        return cluster_list
+
+
+    def get_cluster_info(self, cluster_name:str, cluster_passwd:str) -> dict:
+        '''
+        Get details of a particular cluster
+        Sample url:
+        'http://localhost:1088/logagg/v1/get_cluster_info?cluster_name=logagg&cluster_passwd=xxxx'
+        '''
+
+        cluster = self.master.cluster_collection.find_one({'cluster_name': cluster_name})
+        if not cluster:
+            return {'success': False, 'details': 'Cluster name not found'}
+        else:
+            if cluster['cluster_passwd'] == cluster_passwd:
+                del cluster['_id']
+                return {'success': True, 'cluster_info': cluster}
+            else:
+                return {'success': False, 'details': 'Authentication failed'}
 
 
     def change_cluster_passwd(self, cluster_name:str, old_passwd:str, new_passwd:str) -> dict:
@@ -135,8 +190,8 @@ class MasterService():
                                                                 ]
                                                         })
         if not c:
-
-            return {'authentication': 'failed'}
+            return {'success': False,
+                    'details': 'Authentication failed'}
         
         else:
             query = {'$and':[{'cluster_name': cluster_name}, {'cluster_passwd': old_passwd}]}
@@ -144,10 +199,100 @@ class MasterService():
             c = self.master.cluster_collection.update_one(query, newvalues)
             
             new_cluster_info = self.master.cluster_collection.find_one({'cluster_name': cluster_name})
-            return{'authentication': 'passed',
-                    'cluster_name': new_cluster_info['cluster_name'],
-                    'passwd': new_cluster_info['cluster_passwd']
-                    }
+            return{'success': True,
+                    'cluster_info': {'cluster_name': new_cluster_info['cluster_name'],
+                                     'cluster_passwd': new_cluster_info['cluster_passwd']
+                                }
+                }
+
+
+    def register_component(self, namespace:str, cluster_name:str, cluster_passwd:str, host:str, port:str) -> dict:
+        '''
+        Validate auth details and store details of component in database
+        Sample url:
+        'http://localhost:1088/logagg/v1/register_component?namespace=master&cluster_name=logagg&cluster_passwd=xxxx&host=78.47.113.210&port=1088'
+        '''
+        c = self.master.cluster_collection.find_one({'cluster_name': cluster_name})
+
+        if cluster_passwd == c['cluster_passwd']:
+            component = {'namespace':namespace,
+                    'host':host,
+                    'port':str(port),
+                    'cluster_name':cluster_name}
+
+            component_info = AttrDict(component)
+            try:
+                cluster_name= component_info.cluster_name
+                namespace = component_info.namespace
+                host = component_info.host
+                port = component_info.port
+                self.master.component_collection.update_one({'cluster_name': cluster_name, 'namespace': namespace, 'host': host, 'port': port},
+                                                     {'$set': component},
+                                                     upsert=True)
+                return {'success': True}
+
+            except pymongo.errors.DuplicateKeyError as dke:
+                return {'success': True, 'details': 'Duplicate component details'}
+        else:
+            return {'success': False, 'details': 'Authentication failed'}
+
+
+    def get_components(self, cluster_name:str, cluster_passwd:str) -> dict:
+        '''
+        Get all components in a cluster
+        Sample url:
+        'http://localhost:1088/logagg/v1/get_components?cluster_name=logagg&cluster_passwd=xxxx'
+        '''
+        components_info = list()
+        cluster =  self.master.cluster_collection.find_one({'cluster_name': cluster_name})
+        if not cluster:
+            return {'success': False, 'details': 'Cluster not found'}
+        if cluster['cluster_passwd'] != cluster_passwd:
+            return {'success': False, 'details': 'Authentication failed'}
+
+        for c in self.master.component_collection.find({'cluster_name': cluster_name}):
+            del c['_id']
+            components_info.append(c)
+        return {'success': True, 'components_info': components_info}
+
+
+    def tail_logs(self, req:Request, cluster_name:str, cluster_passwd:str) -> Generator:
+        '''
+        Sample url:
+        'http://localhost:1088/logagg/v1/tail_logs?cluster_name=logagg&cluster_passwd=xxxx'
+        '''
+        cluster =  self.master.cluster_collection.find_one({'cluster_name': cluster_name})
+        if not cluster:
+            return {'success': False, 'details': 'Cluster not found'}
+        if cluster['cluster_passwd'] != cluster_passwd:
+            return {'success': False, 'details': 'Authentication failed'}
+
+        nsq_api_address = cluster['nsq_api_address']
+        topic = cluster['logs_topic']
+        nsqd_tcp_address = cluster['nsqd_tcp_address']
+        url = self.NSQ_API_URL.format(nsq_api_address=nsq_api_address,
+                                        nsqd_tcp_address=nsqd_tcp_address,
+                                        topic=topic,
+                                        empty_lines='yes')
+        s = requests.session()
+        resp = s.get(url, stream=True)
+        start = time.time()
+        log_list = list()
+
+        for log in resp.iter_lines():
+            if req._request.connection.stream.closed():
+                self.log.debug('stream_closed')
+                resp.close()
+                self.finish()
+                break
+            if log:
+                log_list.append(log.decode('utf-8') + '\n')
+            else:
+                 yield ''
+            if time.time() - start >= 1:
+                for l in log_list: yield l
+                log_list = []
+                start = time.time()
 
 class Master():
     '''
@@ -167,7 +312,12 @@ class Master():
         self.log = log
         self.mongodb = mongodb
         self.db_client = self._ensure_db_connection()
-        
+        self._init_mongo_collections()
+        self.update_component_thread = start_daemon_thread(self.update_components)
+        self.update_cluster_components_threads = dict()
+
+       
+    def _init_mongo_collections(self):
         # Collection for nsq details
         self.nsq_collection = self.db_client['nsq']
         self.nsq_collection.create_index([
@@ -175,23 +325,29 @@ class Master():
             ('nsqd_http_address', pymongo.ASCENDING)],
             unique=True)
 
+        # Collection for nsq apis
+        self.nsq_api_collection = self.db_client['nsq_api']
+        self.nsq_api_collection.create_index([
+            ('host', pymongo.ASCENDING),
+            ('port', pymongo.ASCENDING)],
+            unique=True)
+
         # Collection for components
         self.component_collection = self.db_client['components']
         self.component_collection.create_index([
             ('namespace', pymongo.ASCENDING),
             ('host', pymongo.ASCENDING),
-            ('port', pymongo.ASCENDING)],
+            ('port', pymongo.ASCENDING),
+            ('cluster_name', pymongo.ASCENDING)],
             unique=True)
         #FIXME: does not serve it's purpose of expiring records
-        self.component_collection.ensure_index('timestamp', expireAfterSeconds=60)
+        #self.component_collection.ensure_index('timestamp', expireAfterSeconds=60)
 
         # Collection for cluster info
         self.cluster_collection = self.db_client['cluster']
         self.cluster_collection.create_index([
              ('cluster_name', pymongo.ASCENDING)],
              unique=True)
-
-        update_component_th = start_daemon_thread(self.update_component)
 
 
     def _ensure_db_connection(self):
@@ -206,58 +362,55 @@ class Master():
 
         return db_client
 
+    @keeprunning(UPDATE_COMPONENTS_INTERVAL, on_error=log_exception)
+    def _update_cluster_components(self, cluster_name):
+        '''
+        Starts a deamon thread for reading from heartbeat topic and updarting info in database
+        '''
+        cluster_info = self.cluster_collection.find_one({'cluster_name': cluster_name})
+        topic = cluster_info['heartbeat_topic']
+        nsqd_tcp_address = cluster_info['nsqd_tcp_address']
+        nsq_api_address = cluster_info['nsq_api_address']
+
+        url = self.NSQ_API_URL.format(nsq_api_address=nsq_api_address,
+                                        nsqd_tcp_address=nsqd_tcp_address,
+                                        topic=topic,
+                                        empty_lines='no')
+        try:
+            self.log.info("updating_components", cluster=cluster_name)
+            resp = requests.get(url, stream=True)
+            start_read_heartbeat = time.time()
+            for heartbeat in resp.iter_lines():
+                heartbeat = AttrDict(json.loads(heartbeat.decode('utf-8')))
+                cluster_name = heartbeat.cluster_name
+                namespace = heartbeat.namespace
+                host = heartbeat.host
+                port = heartbeat.port
+                self.component_collection.update_one({'cluster_name': cluster_name, 'namespace': namespace, 'host': host, 'port': port},
+                                                     {'$set': heartbeat},
+                                                     upsert=True)
+
+        except requests.exceptions.ConnectionError:
+            self.log.warn('cannot_request_nsq_api___will_try_again')
+
+        except KeyboardInterrupt:
+            if resp: resp.close()
+            sys.exit(0)
+        time.sleep(self.UPDATE_COMPONENTS_INTERVAL)
+
 
     @keeprunning(UPDATE_COMPONENTS_INTERVAL, on_error=log_exception)
-    def update_component(self):
+    def update_components(self):
         '''
         Reads heartbeat and updates components
         '''
-
+        # List of cluster names
         cluster_list = list()
-        nsq_apis = list()
-
-        for nsq in self.nsq_collection.find():
-            cluster_list.append(nsq['cluster_name'])
+        for c in self.cluster_collection.find(): cluster_list.append(c['cluster_name'])
 
         for cluster_name in cluster_list:
-            nsq_apis.append(self.component_collection.find_one({'$and':[{'cluster_name': cluster_name}, {'namespace':'nsq_api'}]}))
+            if cluster_name not in self.update_cluster_components_threads:
+                update_cluster_components_thread = start_daemon_thread(self._update_cluster_components, (cluster_name,))
+                self.update_cluster_components_threads[cluster_name] = update_cluster_components_thread
 
-        for cluster_name in cluster_list:
-            topic = None
-            nsqd_tcp_address = None
-            host = None
-            port = None
-
-            for nsq in self.nsq_collection.find():
-                if nsq['cluster_name'] == cluster_name:
-                    topic = nsq['heartbeat_topic']
-                    nsqd_tcp_address = nsq['nsqd_tcp_address']
-
-            for nsq_api in nsq_apis:
-                try:
-                    if nsq_api['cluster_name'] == cluster_name:
-                        host = nsq_api['host']
-                        port = str(nsq_api['port'])
-                except TypeError:
-                    self.log.error('component_not_found', cluster=cluster_name, component='nsq_api')
-            
-            if topic and nsqd_tcp_address and host and port:
-                url = self.NSQ_API_URL.format(nsq_api_address=host+':'+port,nsqd_tcp_address=nsqd_tcp_address,topic=topic)
-                s = requests.session()
-                try:
-                    resp = requests.get(url, stream=True)
-                    start_read_heartbeat = time.time()
-
-                    for heartbeat in resp.iter_lines():
-                        if not time.time() - start_read_heartbeat > self.UPDATE_COMPONENTS_INTERVAL:
-                            heartbeat = json.loads(heartbeat.decode('utf-8'))
-                            self.component_collection.update_one({}, {'$set': heartbeat}, upsert=True)
-                        else:
-                            resp.close()
-                            break
-
-                except requests.exceptions.ConnectionError:
-                    self.log.warn('cannot_request_nsq_api___will_try_again')
-
-            self.log.debug("updated_components", cluster=cluster_name)
         time.sleep(self.UPDATE_COMPONENTS_INTERVAL)

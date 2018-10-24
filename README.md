@@ -47,16 +47,6 @@ pip2 install git+https://github.com/supriyopaul/nsq_api.git
 * **Help**
     ```bash
     logagg-master runserver --help
-        usage: logagg-cli master [-h] {add,list,nsq} ...
-
-        positional arguments:
-          {add,list,nsq}
-            add           Store logagg-master details
-            list          Print logagg-master details
-            nsq           NSQ for logagg-master
-
-        optional arguments:
-          -h, --help      show this help message and exit
     ```
 * **Command to run `logagg-master` service**
      - [Full API doccumentation](https://) of `logagg-master` service
@@ -77,6 +67,16 @@ Commands require master details along with **auth-key** and **auth-secret** to b
 * **help**
     ```bash
     logagg-cli master --help
+        usage: logagg-cli master [-h] {add,list,nsq} ...
+
+        positional arguments:
+          {add,list,nsq}
+            add           Store logagg-master details
+            list          Print logagg-master details
+            nsq           NSQ for logagg-master
+
+        optional arguments:
+          -h, --help      show this help message and exit
     ```
 * **master add**
     Store `logagg-master` details

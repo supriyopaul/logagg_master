@@ -16,6 +16,9 @@ class MasterService():
     Logagg master API
     '''
     NSQ_API_URL = 'http://{nsq_api_address}/tail?nsqd_tcp_address={nsqd_tcp_address}&topic={topic}&empty_lines={empty_lines}'
+    COLLECTOR_ADD_FILE_URL = 'http://{collector_address}/collector/v1/add_file?fpath={fpath}&formatter={formatter}'
+    COLLECTOR_REMOVE_FILE_URL = 'http://{collector_address}/collector/v1/remove_file?fpath="{fpath}"'
+    COLLECTOR_STOP_URL = 'http://{collector_address}/collector/v1/stop'
     NSQ_DEPTH_LIMIT = 1000000
 
     def __init__(self, master, log):
@@ -254,6 +257,80 @@ class MasterService():
             del c['_id']
             components_info.append(c)
         return {'success': True, 'components_info': components_info}
+
+
+    def collector_add_file(self, cluster_name:str,
+                            cluster_passwd:str,
+                            collector_host:str,
+                            collector_port:str,
+                            fpath:str,
+                            formatter:str) -> dict:
+        '''
+        Add files to collectors
+        Sample url: 'http://localhost:1088/logagg/v1/collector_add_file?namespace=master&
+                     cluster_name=logagg&cluster_passwd=xxxx&collector_host=localhost&collector_port=1088&
+                     fpath="/var/log/serverstats.log"&formatter="logagg_collector.formatters.docker_file_log_driver"'
+        '''
+        cluster =  self.master.cluster_collection.find_one({'cluster_name': cluster_name})
+        if not cluster:
+            return {'success': False, 'details': 'Cluster not found'}
+        if cluster['cluster_passwd'] != cluster_passwd:
+            return {'success': False, 'details': 'Authentication failed'}
+
+        collector_port = str(collector_port)
+        collector = self.master.component_collection.find_one({'cluster_name': cluster_name,
+                                                                'host': collector_host,
+                                                                'port': collector_port,
+                                                                'namespace': 'collector'})
+        if not collector:
+            return {'success': False, 'details': 'Collector not found'}
+        else:
+            collector_address = collector_host + ':' + collector_port
+            add_file_url = self.COLLECTOR_ADD_FILE_URL.format(collector_address=collector_address,
+                                                                fpath=fpath,
+                                                                formatter=formatter)
+            try:
+                add_file_result = requests.get(add_file_url).content
+                add_file_result = json.loads(add_file_result.decode('utf-8'))
+            except requests.exceptions.ConnectionError:
+                return {'success': False, 'details': 'Could not reach collector'}
+            return {'success': True, 'fpaths': add_file_result['result']}
+
+
+    def collector_remove_file(self, cluster_name:str,
+                            cluster_passwd:str,
+                            collector_host:str,
+                            collector_port:str,
+                            fpath:str) -> dict:
+        '''
+        remove file-path from collectors
+        Sample url: 'http://localhost:1088/logagg/v1/collector_remove_file?namespace=master&
+                     cluster_name=logagg&cluster_passwd=xxxx&collector_host=localhost&collector_port=1088&
+                     fpath="/var/log/serverstats.log"'
+        '''
+        cluster =  self.master.cluster_collection.find_one({'cluster_name': cluster_name})
+        if not cluster:
+            return {'success': False, 'details': 'Cluster not found'}
+        if cluster['cluster_passwd'] != cluster_passwd:
+            return {'success': False, 'details': 'Authentication failed'}
+
+        collector_port = str(collector_port)
+        collector = self.master.component_collection.find_one({'cluster_name': cluster_name,
+                                                                'host': collector_host,
+                                                                'port': collector_port,
+                                                                'namespace': 'collector'})
+        if not collector:
+            return {'success': False, 'details': 'Collector not found'}
+        else:
+            collector_address = collector_host + ':' + collector_port
+            remove_file_url = self.COLLECTOR_REMOVE_FILE_URL.format(collector_address=collector_address,
+                                                                fpath=fpath)
+            try:
+                remove_file_result = requests.get(remove_file_url).content
+                remove_file_result = json.loads(remove_file_result.decode('utf-8'))
+            except requests.exceptions.ConnectionError:
+                return {'success': False, 'details': 'Could not reach collector'}
+            return {'success': True, 'fpaths': remove_file_result['result']}
 
 
     def tail_logs(self, req:Request, cluster_name:str, cluster_passwd:str) -> Generator:

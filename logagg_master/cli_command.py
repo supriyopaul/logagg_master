@@ -64,8 +64,19 @@ class LogaggCliCommand(BaseScript):
                                             self.args.new_password,
                                             self.args.old_password)
 
-    def list_components(self):
-        LogaggCli().list_components()
+    def list_collectors(self):
+        LogaggCli().list_collectors()
+
+    def collector_add_file(self):
+        LogaggCli().collector_add_file(self.args.collector_host,
+                self.args.collector_port,
+                self.args.fpath,
+                self.args.formatter)
+
+    def collector_remove_file(self):
+        LogaggCli().collector_remove_file(self.args.collector_host,
+                self.args.collector_port,
+                self.args.fpath)
 
     def tail(self):
         LogaggCli().tail(self.args.pretty)
@@ -124,7 +135,7 @@ class LogaggCliCommand(BaseScript):
 
         # cluster
         cluster_cmd_parser = subcommands.add_parser('cluster',
-                help='Create/join cluster for logagg')
+                help='Operations on clusters in master')
         cluster_cmd_subparser = cluster_cmd_parser.add_subparsers()
         # cluster create
         cluster_cmd_create = cluster_cmd_subparser.add_parser('create',
@@ -174,10 +185,6 @@ class LogaggCliCommand(BaseScript):
         cluster_cmd_change_password.add_argument(
                 '--old-password', '-o', default=None,
                 help='Existing cluster password')
-        # cluster components
-        cluster_cmd_list = cluster_cmd_subparser.add_parser('components',
-                help='List all the components in cluster')
-        cluster_cmd_list.set_defaults(func=self.list_components)
         # cluster tail
         cluster_cmd_tail = cluster_cmd_subparser.add_parser('tail',
                 help='Tail logs in cluster')
@@ -186,6 +193,47 @@ class LogaggCliCommand(BaseScript):
                 '--pretty', '-p',
                 action='store_true',
                 help='Print logs in pretty format')
+        # cluster collector
+        cluster_cmd_collector = cluster_cmd_subparser.add_parser('collector',
+                help='Operations on cluster collectors')
+        cluster_cmd_collector_subparser = cluster_cmd_collector.add_subparsers()
+        # cluster collector list
+        cluster_cmd_collector_list = cluster_cmd_collector_subparser.add_parser('list',
+                 help='List all collectors')
+        cluster_cmd_collector_list.set_defaults(func=self.list_collectors)
+        # cluster collector add-file
+        cluster_cmd_collector_add_file = cluster_cmd_collector_subparser.add_parser('add-file',
+                help='Add file paths to collectors')
+        cluster_cmd_collector_add_file.set_defaults(func=self.collector_add_file)
+        cluster_cmd_collector_add_file.add_argument(
+                '--collector-host', '-c',
+                required=True,
+                help='Host on which the collector is running')
+        cluster_cmd_collector_add_file.add_argument(
+                '--collector-port', '-p',
+                required=True,
+                help='Port on which collector service is running')
+        cluster_cmd_collector_add_file.add_argument(
+                '--fpath', '-f',
+                help='File path of the log-file on the node where collector is running')
+        cluster_cmd_collector_add_file.add_argument(
+                '--formatter', '-b',
+                help='Formatter to use for the log-file')
+        # cluster collector remove-file
+        cluster_cmd_collector_remove_file = cluster_cmd_collector_subparser.add_parser('remove-file',
+                help='Remove file-path from collectors')
+        cluster_cmd_collector_remove_file.set_defaults(func=self.collector_remove_file)
+        cluster_cmd_collector_remove_file.add_argument(
+                '--collector-host', '-c',
+                required=True,
+                help='Host on which the collector is running')
+        cluster_cmd_collector_remove_file.add_argument(
+                '--collector-port', '-p',
+                required=True,
+                help='Port on which collector service is running')
+        cluster_cmd_collector_remove_file.add_argument(
+                '--fpath', '-f',
+                help='File path of the log-file on the node where collector is running')
 
 
 def main():

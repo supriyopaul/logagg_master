@@ -26,6 +26,8 @@ class LogaggCli():
     CHANGE_CLUSTER_PASSWD_URL = 'http://{host}:{port}/logagg/v1/change_cluster_passwd?cluster_name={cluster_name}&old_passwd={old_passwd}&new_passwd={new_passwd}'
     GET_COMPONENT_URL = 'http://{host}:{port}/logagg/v1/get_components?cluster_name={cluster_name}&cluster_passwd={cluster_passwd}'
     TAIL_LOGS_URL = 'http://{host}:{port}/logagg/v1/tail_logs?cluster_name={cluster_name}&cluster_passwd={cluster_passwd}'
+    COLLECTOR_ADD_FILE_URL = 'http://{host}:{port}/logagg/v1/collector_add_file?cluster_name={cluster_name}&cluster_passwd={cluster_passwd}&collector_host={collector_host}&collector_port={collector_port}&fpath="{fpath}"&formatter="{formatter}"'
+    COLLECTOR_REMOVE_FILE_URL = 'http://{host}:{port}/logagg/v1/collector_remove_file?cluster_name={cluster_name}&cluster_passwd={cluster_passwd}&collector_host={collector_host}&collector_port={collector_port}&fpath="{fpath}"'
 
     def __init__(self):
         self.data_path = ensure_dir(expanduser('~/.logagg'))
@@ -337,9 +339,9 @@ class LogaggCli():
             prGreen(msg.format(cluster_name=cluster_name))
 
     
-    def list_components(self):
+    def list_collectors(self):
         '''
-        List components in an existing cluster
+        List collectors in an existing cluster
         '''
         master = self.ensure_master()
 
@@ -370,14 +372,15 @@ class LogaggCli():
 
                 data =  list()
                 for c in components_info:
-                    data.append([c.get('namespace'),
-                                 c.get('host'),
-                                 c.get('port'),
-                                 c.get('cluster_name'),
-                                 c.get('files_tracked'),
-                                 c.get('heartbeat_number'),
-                                 c.get('timestamp')]
-                                 )
+                    if c.get('namespace') == 'collector':
+                        data.append([c.get('namespace'),
+                                     c.get('host'),
+                                     c.get('port'),
+                                     c.get('cluster_name'),
+                                     c.get('files_tracked'),
+                                     c.get('heartbeat_number'),
+                                     c.get('timestamp')]
+                                     )
                 print(tabulate(data, headers=headers))
 
             else:
@@ -471,3 +474,80 @@ class LogaggCli():
             except KeyboardInterrupt:
                 if resp: resp.close()
                 sys.exit(0)
+
+
+    def collector_add_file(self, collector_host, collector_port, fpath, formatter):
+        '''
+        Add file to collector
+        '''
+        master = self.ensure_master()
+
+        if not self.state['default_cluster']:
+            err_msg = 'No default cluster'
+            prRed(err_msg)
+        else:
+            cluster_name = self.state['default_cluster']['cluster_name']
+            cluster_passwd = self.state['default_cluster']['cluster_passwd']
+
+            add_file_url = self.COLLECTOR_ADD_FILE_URL.format(host=master.host,
+                                                                port=master.port,
+                                                                cluster_name=cluster_name,
+                                                                cluster_passwd=cluster_passwd,
+                                                                collector_host=collector_host,
+                                                                collector_port=collector_port,
+                                                                fpath=fpath,
+                                                                formatter=formatter)
+
+            add_file_result = self.request_master_url(add_file_url)
+
+            if add_file_result['result']['success']: 
+                new_fpaths_list = list()
+                for fpath in add_file_result['result']['fpaths']: new_fpaths_list.append([fpath['fpath']])
+                headers = ['File paths']
+                data = list()
+                #print result
+                print(tabulate(new_fpaths_list, headers=headers))
+
+            else:
+                # Print result
+                msg = get_components_result['result']['details']
+                prRed(msg)
+
+
+    def collector_remove_file(self, collector_host, collector_port, fpath):
+        '''
+        Remove file-path from collector
+        '''
+        master = self.ensure_master()
+
+        if not self.state['default_cluster']:
+            err_msg = 'No default cluster'
+            prRed(err_msg)
+        else:
+            cluster_name = self.state['default_cluster']['cluster_name']
+            cluster_passwd = self.state['default_cluster']['cluster_passwd']
+
+            remove_file_url = self.COLLECTOR_REMOVE_FILE_URL.format(host=master.host,
+                                                                port=master.port,
+                                                                cluster_name=cluster_name,
+                                                                cluster_passwd=cluster_passwd,
+                                                                collector_host=collector_host,
+                                                                collector_port=collector_port,
+                                                                fpath=fpath)
+
+            remove_file_result = self.request_master_url(remove_file_url)
+
+            if remove_file_result['result']['success']: 
+                new_fpaths_list = list()
+                for fpath in remove_file_result['result']['fpaths']: new_fpaths_list.append([fpath['fpath']])
+                headers = ['File paths']
+                data = list()
+                #print result
+                print(tabulate(new_fpaths_list, headers=headers))
+
+            else:
+                # Print result
+                msg = get_components_result['result']['details']
+                prRed(msg)
+
+

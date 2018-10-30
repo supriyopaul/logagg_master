@@ -454,25 +454,29 @@ class LogaggCli():
                                                         cluster_passwd=cluster_passwd)
 
             try:
-                resp = requests.get(tail_logs_url, stream=True)
+                session = requests.session()
+                resp = session.get(tail_logs_url, stream=True)
                 c = ConsoleRenderer()
                 for line in resp.iter_lines():
+                    log = dict()
+                    try:
+                        result = json.loads(line.decode('utf-8'))
+                        if result: log = json.loads(result)
+                        else: continue
+                    except ValueError:
+                        print(Exception('ValueError log:{}'.format(result)))
+                        continue
                     if pretty:
-                        try:
-                            result = json.loads(line.decode('utf-8'))
-                            log = json.loads(result.get('result'))
-                        except ValueError:
-                            print(Exception('ValueError log:{}'.format(result)))
-                            continue
                         print(c(None, None, log))
                     else:
-                        print(log.decode('utf-8'))
+                        print(log)
             except requests.exceptions.ConnectionError:
                 err_msg = 'Cannot request master'
-                prRed(msg)
+                prRed(err_msg)
                 sys.exit(0)
-            except KeyboardInterrupt:
+            except Exception as e:
                 if resp: resp.close()
+                raise e
                 sys.exit(0)
 
 

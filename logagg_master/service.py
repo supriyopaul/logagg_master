@@ -352,7 +352,11 @@ class MasterService():
                                         topic=topic,
                                         empty_lines='yes')
         s = requests.session()
-        resp = s.get(url, stream=True)
+        try:
+            resp = s.get(url, stream=True)
+        except requests.exceptions.ConnectionError:
+            self.log.error('cannot_request_nsq_api', url=url)
+            return  {'success': False, 'details': 'Cannot request nsq api'}
         start = time.time()
         log_list = list()
 
@@ -360,7 +364,6 @@ class MasterService():
             if req._request.connection.stream.closed():
                 self.log.debug('stream_closed')
                 resp.close()
-                self.finish()
                 break
             if log:
                 log_list.append(log.decode('utf-8') + '\n')
@@ -468,7 +471,7 @@ class Master():
                                                      upsert=True)
 
         except requests.exceptions.ConnectionError:
-            self.log.warn('cannot_request_nsq_api___will_try_again')
+            self.log.warn('cannot_request_nsq_api___will_try_again', url=url)
 
         except KeyboardInterrupt:
             if resp: resp.close()

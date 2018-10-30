@@ -15,7 +15,7 @@ setup(
     ],
     install_requires=[
 	'basescript==0.2.6',
-        'kwikapi-tornado==0.3.1',
+        'kwikapi-tornado==0.3.2',
         'logagg_utils==0.5.0',
         'ujson==1.35',
         'pymongo==3.7.2',

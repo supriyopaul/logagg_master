@@ -461,6 +461,7 @@ class LogaggCli():
                     log = dict()
                     try:
                         result = json.loads(line.decode('utf-8'))
+                        result = result.get('result')
                         if result: log = json.loads(result)
                         else: continue
                     except ValueError:

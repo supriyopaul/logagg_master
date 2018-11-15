@@ -138,7 +138,7 @@ class MasterService():
                 'nsqd_http_address': nsq['nsqd_http_address'],
                 'nsq_depth_limit': nsq['nsq_depth_limit'],
                 'nsq_api_address': nsq['nsq_api_address'],
-                'heartbeat_topic': cluster_name+'_heartbeat',
+                'heartbeat_topic': cluster_name+'_heartbeat#ephemeral',
                 'logs_topic': cluster_name+'_logs'}
         try:
             object_id = self.master.cluster_collection.insert_one(cluster_info).inserted_id

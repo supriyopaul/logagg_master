@@ -1,7 +1,6 @@
 
 from basescript import BaseScript
 from deeputil import AttrDict
-from logagg_utils import InvalidArgument
 
 from .cli import LogaggCli
 
@@ -31,7 +30,7 @@ class LogaggCliCommand(BaseScript):
         try:
             auth = self._parse_auth_args()
         except:
-            raise InvalidArgument(self.args.auth)
+            raise Exception('Invalid Argument', arg=self.args.auth)
 
         LogaggCli().add_master(self.args.host, self.args.port, auth)
 
